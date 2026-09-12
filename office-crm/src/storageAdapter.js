@@ -1,12 +1,10 @@
-import { supabase } from "./supabaseClient";
+import { supabase, supabaseInitError } from "./supabaseClient";
 
-// همه‌ی داده‌های دفتر (فایل‌ها، مشتری‌ها، پیگیری‌ها، ...) در یک ردیف واحد
-// از جدول app_state به صورت JSON نگهداری می‌شود. ساده‌ترین راه برای نسخه اول
-// و کاملاً کافی برای یک دفتر با چند مشاور.
 const ROW_ID = 1;
 const TABLE = "app_state";
 
 export async function loadData() {
+  if (!supabase) throw new Error(supabaseInitError || "اتصال به دیتابیس برقرار نشد.");
   const { data, error } = await supabase
     .from(TABLE)
     .select("data")
@@ -18,6 +16,7 @@ export async function loadData() {
 }
 
 export async function saveData(value) {
+  if (!supabase) throw new Error(supabaseInitError || "اتصال به دیتابیس برقرار نشد.");
   const { error } = await supabase
     .from(TABLE)
     .upsert({ id: ROW_ID, data: value, updated_at: new Date().toISOString() });
