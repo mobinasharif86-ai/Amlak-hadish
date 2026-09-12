@@ -33,6 +33,8 @@ function sbHeaders(env) {
 }
 
 async function fetchState(env) {
+  if (!env.SUPABASE_URL) throw new Error("SUPABASE_URL روی سرور تنظیم نشده است.");
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY روی سرور تنظیم نشده است.");
   const res = await fetch(`${env.SUPABASE_URL}/rest/v1/app_state?id=eq.1&select=data`, {
     headers: sbHeaders(env),
   });
