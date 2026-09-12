@@ -1,26 +1,33 @@
-import { supabase, supabaseInitError } from "./supabaseClient";
+// این فایل دیگر مستقیم با Supabase صحبت نمی‌کند. به‌جای آن، درخواست‌ها را به
+// همان Worker خودمان (worker.js) می‌فرستد که کلید محرمانه را فقط سمت سرور نگه می‌دارد.
 
-const ROW_ID = 1;
-const TABLE = "app_state";
-
-export async function loadData() {
-  if (!supabase) throw new Error(supabaseInitError || "اتصال به دیتابیس برقرار نشد.");
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select("data")
-    .eq("id", ROW_ID)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data ? data.data : null;
+export async function fetchPublicAdvisors() {
+  const res = await fetch("/api/public-advisors");
+  if (!res.ok) throw new Error("خطا در دریافت لیست مشاوران.");
+  const json = await res.json();
+  return json.advisors || [];
 }
 
-export async function saveData(value) {
-  if (!supabase) throw new Error(supabaseInitError || "اتصال به دیتابیس برقرار نشد.");
-  const { error } = await supabase
-    .from(TABLE)
-    .upsert({ id: ROW_ID, data: value, updated_at: new Date().toISOString() });
+export async function loadDataWithCreds(creds) {
+  const res = await fetch("/api/state", {
+    headers: { "X-Auth": JSON.stringify(creds) },
+  });
+  if (res.status === 401) {
+    const err = new Error("رمز عبور اشتباه است.");
+    err.unauthorized = true;
+    throw err;
+  }
+  if (!res.ok) throw new Error("اتصال به سرور برقرار نشد.");
+  const json = await res.json();
+  return json.data;
+}
 
-  if (error) throw error;
+export async function saveDataWithCreds(creds, value) {
+  const res = await fetch("/api/state", {
+    method: "POST",
+    headers: { "X-Auth": JSON.stringify(creds), "Content-Type": "application/json" },
+    body: JSON.stringify(value),
+  });
+  if (!res.ok) throw new Error("ذخیره‌سازی ناموفق بود.");
   return true;
 }

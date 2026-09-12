@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { loadData, saveData } from "./storageAdapter";
+import { fetchPublicAdvisors, loadDataWithCreds, saveDataWithCreds } from "./storageAdapter";
 
 /* ---------------------------------- ثابت‌ها ---------------------------------- */
 
@@ -210,71 +210,63 @@ function Modal({ title, onClose, children, wide }) {
 /* ---------------------------------- اپ اصلی ---------------------------------- */
 
 export default function App() {
-  const [data, setData] = useState(null);
-  const [loaded, setLoaded] = useState(false);
-  const [loadErr, setLoadErr] = useState(null);
+  const [advisorsList, setAdvisorsList] = useState(null); // for login screen buttons
+  const [advisorsLoadErr, setAdvisorsLoadErr] = useState(null);
+  const [creds, setCreds] = useState(null); // {role, id?, password}
   const [currentUser, setCurrentUser] = useState(null); // {id, name, role}
+  const [data, setData] = useState(null);
   const [tab, setTab] = useState("today");
   const [saveErr, setSaveErr] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await loadData();
-        setData(res || emptyData());
-      } catch (e) {
-        setLoadErr(e?.message || String(e));
-        setData(emptyData());
-      } finally {
-        setLoaded(true);
-      }
-    })();
+    fetchPublicAdvisors()
+      .then(setAdvisorsList)
+      .catch((e) => setAdvisorsLoadErr(e?.message || String(e)));
+  }, []);
+
+  const handleLogin = useCallback(async (loginCreds, userInfo) => {
+    const d = await loadDataWithCreds(loginCreds); // throws on wrong password / server error
+    setData(d);
+    setCreds(loginCreds);
+    setCurrentUser(userInfo);
+  }, []);
+
+  const logout = useCallback(() => {
+    setCurrentUser(null);
+    setData(null);
+    setCreds(null);
   }, []);
 
   const persist = useCallback(async (next) => {
     setData(next);
     try {
-      await saveData(next);
+      await saveDataWithCreds(creds, next);
       setSaveErr(false);
     } catch {
       setSaveErr(true);
     }
+  }, [creds]);
+
+  // وقتی مدیر رمز خودش را عوض می‌کند، باید نشست فعلی هم به‌روزرسانی شود
+  // وگرنه درخواست‌های بعدی با رمز قدیمی رد می‌شوند.
+  const updateOwnPassword = useCallback((newPassword) => {
+    setCreds((c) => (c ? { ...c, password: newPassword } : c));
   }, []);
-
-  if (!loaded || !data) {
-    return (
-      <div className="office-root">
-        <GlobalStyle />
-        <div className="empty-hint">در حال بارگذاری…</div>
-      </div>
-    );
-  }
-
-  if (loadErr) {
-    return (
-      <div className="office-root">
-        <GlobalStyle />
-        <div className="login-wrap">
-          <div className="login-card">
-            <div className="mark">⚠️</div>
-            <h1 style={{ fontSize: 17, marginBottom: 10 }}>اتصال به دیتابیس برقرار نشد</h1>
-            <p className="muted" style={{ marginBottom: 14, fontSize: 12.5, textAlign: "right" }}>{loadErr}</p>
-            <p className="muted" style={{ fontSize: 11.5, textAlign: "right" }}>
-              معمولاً یعنی متغیرهای <b>VITE_SUPABASE_URL</b> و <b>VITE_SUPABASE_ANON_KEY</b> در تنظیمات هاست
-              (به‌عنوان Build variable) درست وارد نشده‌اند، یا جدول <b>app_state</b> هنوز در Supabase ساخته نشده.
-              بعد از اصلاح، باید یک‌بار دوباره Deploy بزنید.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (!currentUser) {
     return (
       <div className="office-root">
         <GlobalStyle />
-        <LoginScreen data={data} onLogin={setCurrentUser} />
+        <LoginScreen advisorsList={advisorsList} advisorsLoadErr={advisorsLoadErr} onLogin={handleLogin} />
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="office-root">
+        <GlobalStyle />
+        <div className="empty-hint">در حال بارگذاری…</div>
       </div>
     );
   }
@@ -284,29 +276,36 @@ export default function App() {
       data={data}
       persist={persist}
       currentUser={currentUser}
-      setCurrentUser={setCurrentUser}
+      setCurrentUser={logout}
       tab={tab}
       setTab={setTab}
       saveErr={saveErr}
+      updateOwnPassword={updateOwnPassword}
     />
   );
 }
 
-function LoginScreen({ data, onLogin }) {
+function LoginScreen({ advisorsList, advisorsLoadErr, onLogin }) {
   const [selected, setSelected] = useState(null); // {id, name, role}
   const [pass, setPass] = useState("");
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const choose = (u) => { setSelected(u); setPass(""); setErr(""); };
 
-  const submit = () => {
-    if (selected.role === "manager") {
-      if (pass === (data.managerPassword || "")) return onLogin(selected);
-    } else {
-      const a = data.advisors.find((x) => x.id === selected.id);
-      if (a && pass === (a.password || "")) return onLogin(selected);
+  const submit = async () => {
+    setBusy(true);
+    setErr("");
+    const creds = selected.role === "manager"
+      ? { role: "manager", password: pass }
+      : { role: "advisor", id: selected.id, password: pass };
+    try {
+      await onLogin(creds, selected);
+    } catch (e) {
+      setErr(e?.message || "خطا در ورود.");
+    } finally {
+      setBusy(false);
     }
-    setErr("رمز عبور اشتباه است.");
   };
 
   return (
@@ -319,10 +318,12 @@ function LoginScreen({ data, onLogin }) {
           <>
             <p className="muted" style={{ marginBottom: 18 }}>شما چه کسی هستید؟</p>
             <button className="user-choice" onClick={() => choose({ id: "manager", name: "مدیر دفتر", role: "manager" })}>👤 مدیر دفتر</button>
-            {data.advisors.filter((a) => a.active).map((a) => (
+            {advisorsList === null && !advisorsLoadErr && <p className="muted" style={{ marginTop: 8, fontSize: 11.5 }}>در حال بارگذاری لیست مشاوران…</p>}
+            {advisorsLoadErr && <p className="muted" style={{ marginTop: 8, fontSize: 11.5, color: "var(--danger)" }}>{advisorsLoadErr}</p>}
+            {advisorsList && advisorsList.map((a) => (
               <button key={a.id} className="user-choice" onClick={() => choose({ id: a.id, name: a.name, role: "advisor" })}>🧑‍💼 {a.name}</button>
             ))}
-            {data.advisors.filter((a) => a.active).length === 0 && (
+            {advisorsList && advisorsList.length === 0 && (
               <p className="muted" style={{ marginTop: 8, fontSize: 11.5 }}>
                 هنوز مشاوری تعریف نشده. مدیر باید ابتدا وارد شود و از بخش «مشاوران» آن‌ها را با نام و رمز عبور اضافه کند.
               </p>
@@ -339,14 +340,14 @@ function LoginScreen({ data, onLogin }) {
                 autoFocus
                 value={pass}
                 onChange={(e) => { setPass(e.target.value); setErr(""); }}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
+                onKeyDown={(e) => e.key === "Enter" && !busy && submit()}
                 placeholder="رمز عبور"
               />
             </div>
             {err && <div className="muted" style={{ color: "var(--danger)", marginBottom: 8 }}>{err}</div>}
             <div className="row" style={{ justifyContent: "center", marginTop: 6 }}>
-              <button className="btn btn-ghost" onClick={() => setSelected(null)}>بازگشت</button>
-              <button className="btn btn-primary" onClick={submit}>ورود</button>
+              <button className="btn btn-ghost" onClick={() => setSelected(null)} disabled={busy}>بازگشت</button>
+              <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? "..." : "ورود"}</button>
             </div>
           </>
         )}
@@ -361,7 +362,7 @@ function LoginScreen({ data, onLogin }) {
 
 /* ---------------------------------- پوسته اصلی ---------------------------------- */
 
-function MainShell({ data, persist, currentUser, setCurrentUser, tab, setTab, saveErr }) {
+function MainShell({ data, persist, currentUser, setCurrentUser, tab, setTab, saveErr, updateOwnPassword }) {
   const isManager = currentUser.role === "manager";
 
   const advisorTabs = [
@@ -427,7 +428,7 @@ function MainShell({ data, persist, currentUser, setCurrentUser, tab, setTab, sa
             {tab === "goals" && isManager && <GoalsTab data={data} persist={persist} helpers={helpers} />}
             {tab === "reviews" && isManager && <ReviewsTab data={data} persist={persist} helpers={helpers} />}
             {tab === "issues" && isManager && <IssuesTab data={data} persist={persist} />}
-            {tab === "advisors" && isManager && <AdvisorsTab data={data} persist={persist} />}
+            {tab === "advisors" && isManager && <AdvisorsTab data={data} persist={persist} updateOwnPassword={updateOwnPassword} />}
           </div>
         </div>
 
@@ -1354,7 +1355,7 @@ function IssueForm({ initial, onSave, onClose }) {
 
 /* ---------------------------------- مدیریت مشاوران ---------------------------------- */
 
-function AdvisorsTab({ data, persist }) {
+function AdvisorsTab({ data, persist, updateOwnPassword }) {
   const [name, setName] = useState("");
   const [newPass, setNewPass] = useState("");
   const [mgrPass, setMgrPass] = useState(data.managerPassword || "");
@@ -1369,7 +1370,11 @@ function AdvisorsTab({ data, persist }) {
   const rename = (id, val) => persist({ ...data, advisors: data.advisors.map((a) => a.id === id ? { ...a, name: val } : a) });
   const changePass = (id, val) => persist({ ...data, advisors: data.advisors.map((a) => a.id === id ? { ...a, password: val } : a) });
   const remove = (id) => persist({ ...data, advisors: data.advisors.filter((a) => a.id !== id) });
-  const saveMgrPass = () => { if (mgrPass.trim()) persist({ ...data, managerPassword: mgrPass.trim() }); };
+  const saveMgrPass = () => {
+    if (!mgrPass.trim()) return;
+    persist({ ...data, managerPassword: mgrPass.trim() });
+    updateOwnPassword(mgrPass.trim());
+  };
 
   return (
     <div>
