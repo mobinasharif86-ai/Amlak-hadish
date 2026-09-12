@@ -212,6 +212,7 @@ function Modal({ title, onClose, children, wide }) {
 export default function App() {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState(null);
   const [currentUser, setCurrentUser] = useState(null); // {id, name, role}
   const [tab, setTab] = useState("today");
   const [saveErr, setSaveErr] = useState(false);
@@ -221,7 +222,8 @@ export default function App() {
       try {
         const res = await loadData();
         setData(res || emptyData());
-      } catch {
+      } catch (e) {
+        setLoadErr(e?.message || String(e));
         setData(emptyData());
       } finally {
         setLoaded(true);
@@ -244,6 +246,26 @@ export default function App() {
       <div className="office-root">
         <GlobalStyle />
         <div className="empty-hint">در حال بارگذاری…</div>
+      </div>
+    );
+  }
+
+  if (loadErr) {
+    return (
+      <div className="office-root">
+        <GlobalStyle />
+        <div className="login-wrap">
+          <div className="login-card">
+            <div className="mark">⚠️</div>
+            <h1 style={{ fontSize: 17, marginBottom: 10 }}>اتصال به دیتابیس برقرار نشد</h1>
+            <p className="muted" style={{ marginBottom: 14, fontSize: 12.5, textAlign: "right" }}>{loadErr}</p>
+            <p className="muted" style={{ fontSize: 11.5, textAlign: "right" }}>
+              معمولاً یعنی متغیرهای <b>VITE_SUPABASE_URL</b> و <b>VITE_SUPABASE_ANON_KEY</b> در تنظیمات هاست
+              (به‌عنوان Build variable) درست وارد نشده‌اند، یا جدول <b>app_state</b> هنوز در Supabase ساخته نشده.
+              بعد از اصلاح، باید یک‌بار دوباره Deploy بزنید.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
